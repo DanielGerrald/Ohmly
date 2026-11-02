@@ -64,6 +64,10 @@ import {
   insertFinalCheckOutSqlite,
   selectFinalCheckOutSqlite,
 } from "../Database/FinalCheckOutDatabase";
+import {
+  saveOfflineCredential,
+  verifyOfflineCredential,
+} from "../Database/OfflineCredentials";
 import Loading from "../components/ui/Loading";
 import Version from "../components/ui/Version";
 import { useSQLiteContext } from "expo-sqlite";
@@ -265,6 +269,12 @@ export default function Login() {
 
       const updatedUser = await selectUserSqlite(db, apiLoginData.localId);
 
+      // Remember a hash of this password so the user can log in offline
+      // later. Runs in the background so it doesn't slow down this login.
+      saveOfflineCredential(apiLoginData.localId, password).catch((error) =>
+        console.warn("Could not save offline credential:", error),
+      );
+
       if (!updatedUser) {
         setLoading(false);
         Alert.alert("User data not found. Please log in again.");
@@ -308,20 +318,36 @@ export default function Login() {
   /**
    * Lets a previously-logged-in user in without internet.
    *
-   * How it works: looks the user up in SQLite by the email typed in. If they
-   * exist and their saved token hasn't expired, they're marked as logged in
-   * (logged_in = 1, last_login = now) in SQLite and signed in with the cached
-   * data; otherwise an alert explains they need internet. The password is
-   * not checked in this path.
+   * How it works:
+   * 1. Looks the user up in SQLite by the email typed in.
+   * 2. Checks the typed password against the hash saved at their last online
+   *    login (see Database/OfflineCredentials.js). If no hash exists yet
+   *    (they haven't logged in online since this check was added), offline
+   *    login is refused and they're asked to log in online once.
+   * 3. Checks their saved token hasn't expired.
+   * 4. Marks them as logged in (logged_in = 1, last_login = now) in SQLite
+   *    and signs them in with the cached data.
+   * Any failed step shows an alert and stops.
    */
   async function handleOfflineLogin() {
-    setLoading(false);
     const sqliteUserData = await selectUserByEmailSqlite(db, formData.username);
+    const passwordCheck = sqliteUserData
+      ? await verifyOfflineCredential(sqliteUserData.localId, formData.password)
+      : null;
+    setLoading(false);
+
     if (!sqliteUserData) {
       Alert.alert(
         "The username does not exist!",
         "Try again when you have internet access",
       );
+    } else if (passwordCheck === "missing") {
+      Alert.alert(
+        "Offline login not set up",
+        "Connect to the internet and log in once to enable offline login on this device.",
+      );
+    } else if (passwordCheck !== "ok") {
+      Alert.alert("Username and/or password is incorrect");
     } else if (await isTokenExpired(sqliteUserData.idToken)) {
       Alert.alert(
         "Session expired.",
