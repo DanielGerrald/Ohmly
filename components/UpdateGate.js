@@ -105,7 +105,8 @@ const MINIMUMS_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Returns the minimum versions, using the cache if it is less than 5
- * minutes old, otherwise calling getMinimums() and caching the result.
+ * minutes old, otherwise calling getMinimums(). Only successful results
+ * are cached.
  *
  * @returns {Promise<Object|undefined>}
  */
@@ -114,7 +115,11 @@ async function fetchMinimums() {
     return cachedMinimums.value;
   }
   const value = await getMinimums();
-  cachedMinimums = { value, fetchedAt: Date.now() };
+  // Only cache a real answer, so a failed (e.g. offline) fetch is retried
+  // on the next check instead of being reused for 5 minutes.
+  if (value) {
+    cachedMinimums = { value, fetchedAt: Date.now() };
+  }
   return value;
 }
 
@@ -129,9 +134,11 @@ async function fetchMinimums() {
  * - "ok" otherwise,
  * - "error" if the check itself failed (in development builds an error is
  *   treated as "ok" so you aren't blocked while coding).
- * Note: if getMinimums returns undefined (offline), reading its fields
- * throws and the result is "error". App.js does not block on "error",
- * but it does skip the OTA update check in that case.
+ * If the minimums can't be fetched (offline, or /version.json missing),
+ * the OS is checked against the built-in defaults (DEFAULT_MIN_IOS_VERSION,
+ * DEFAULT_MIN_ANDROID_API) and the app-version check is skipped, so the
+ * result is "ok" and App.js still runs its OTA update check. The same
+ * happens if minimum_version isn't set on the server.
  *
  * @returns {{state: Object, retry: Function}} current state and a function
  *   to run the check again
@@ -145,14 +152,18 @@ export function useForcedUpdateGate() {
   const check = React.useCallback(async () => {
     try {
       const installedVersion = Application.nativeApplicationVersion ?? "0.0.0";
-      const minimum = await fetchMinimums();
+      // If the minimums couldn't be fetched (offline, or nothing configured),
+      // fall back to the built-in OS defaults and don't block on app version.
+      const minimum = (await fetchMinimums()) ?? {};
 
       if (!isOsSupported(minimum)) {
         setState({ status: "unsupported_os" });
         return;
       }
 
-      const versionTooLow = compareSemver(installedVersion, minimum.minVersion) < 0;
+      const versionTooLow =
+        minimum.minVersion != null &&
+        compareSemver(installedVersion, minimum.minVersion) < 0;
 
       if (versionTooLow) {
         setState({ status: "required", installedVersion, minVersion: minimum.minVersion });

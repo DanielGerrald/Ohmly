@@ -6,6 +6,7 @@
 
 import axios from "axios";
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -96,9 +97,7 @@ export async function insertContactSqlite(db, contact, assignmentId) {
       assignment_id: assignmentId,
     };
 
-    const columns = Object.keys(data).filter(
-      (key) => data[key] !== undefined && data[key] !== null,
-    );
+    const columns = safeColumnsFrom(data);
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => data[key]);
 
@@ -113,7 +112,9 @@ export async function insertContactSqlite(db, contact, assignmentId) {
 
 /**
  * Reads contact rows where one column equals a value
- * (usually key = "assignment_id"). `key` must be a trusted column name.
+ * (usually key = "assignment_id").
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key - column to filter on
@@ -122,7 +123,7 @@ export async function insertContactSqlite(db, contact, assignmentId) {
  */
 export async function selectContactSqlite(db, key, value) {
   try {
-    return await db.getAllAsync(`SELECT * FROM contact WHERE ${key} = ?`, [
+    return await db.getAllAsync(`SELECT * FROM contact WHERE ${safeColumn(key)} = ?`, [
       value,
     ]);
   } catch (error) {

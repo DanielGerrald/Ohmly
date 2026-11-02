@@ -10,6 +10,7 @@
 import axios from "axios";
 import { getUnixTime } from "date-fns";
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -142,9 +143,7 @@ export async function postFinalCheckoutApi(token, comment, assignment_id) {
  */
 export async function insertFinalCheckOutSqlite(db, data) {
   try {
-    const columns = Object.keys(data).filter(
-      (key) => data[key] !== undefined && data[key] !== null,
-    );
+    const columns = safeColumnsFrom(data);
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => data[key]);
 
@@ -159,7 +158,8 @@ export async function insertFinalCheckOutSqlite(db, data) {
 
 /**
  * Reads completion rows where one column equals a value.
- * `key` must be a trusted column name.
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key - column (e.g. "assignment_id")
@@ -168,7 +168,7 @@ export async function insertFinalCheckOutSqlite(db, data) {
  */
 export async function selectFinalCheckOutSqlite(db, key, value) {
   try {
-    return await db.getAllAsync(`SELECT * FROM completion WHERE ${key} = ?`, [
+    return await db.getAllAsync(`SELECT * FROM completion WHERE ${safeColumn(key)} = ?`, [
       value,
     ]);
   } catch (error) {
@@ -178,7 +178,8 @@ export async function selectFinalCheckOutSqlite(db, key, value) {
 
 /**
  * Runs: UPDATE completion SET key1 = value1 WHERE key2 = value2.
- * Column names must be trusted.
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key1 - column to change
@@ -194,7 +195,7 @@ export async function updateFinalCheckOutSqlite(
   value2,
 ) {
   try {
-    await db.runAsync(`UPDATE completion SET ${key1} = ? WHERE ${key2} = ?`, [
+    await db.runAsync(`UPDATE completion SET ${safeColumn(key1)} = ? WHERE ${safeColumn(key2)} = ?`, [
       value1,
       value2,
     ]);

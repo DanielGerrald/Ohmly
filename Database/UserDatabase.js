@@ -9,6 +9,7 @@
 
 import axios from "axios";
 import { environment } from "../Config";
+import { safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -241,9 +242,7 @@ export async function postRecoverPasswordAPI(email) {
  */
 export async function insertUserSqlite(db, data) {
   try {
-    const columns = Object.keys(data).filter(
-      (key) => data[key] !== undefined && data[key] !== null,
-    );
+    const columns = safeColumnsFrom(data);
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => data[key]);
 
@@ -270,11 +269,9 @@ export async function updateUserSqlite(db, data) {
     const fieldsToUpdate = [];
     const values = [];
 
-    for (const [key, value] of Object.entries(data)) {
-      if (key !== "localId" && value !== undefined && value !== null) {
-        fieldsToUpdate.push(`${key} = ?`);
-        values.push(value);
-      }
+    for (const key of safeColumnsFrom(data, ["localId"])) {
+      fieldsToUpdate.push(`${key} = ?`);
+      values.push(data[key]);
     }
     await db.runAsync(
       `UPDATE user SET ${fieldsToUpdate.join(", ")} WHERE localId = ?`,

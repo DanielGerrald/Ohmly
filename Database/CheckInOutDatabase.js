@@ -10,6 +10,7 @@
 import axios from "axios";
 import { getUnixTime } from "date-fns";
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom, safeSortOrder } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -95,9 +96,7 @@ export async function insertCheckInOutSqlite(db, data) {
       data = { ...data, visit_date: getUnixTime(new Date()) };
     }
 
-    const columns = Object.keys(data).filter(
-      (key) => data[key] !== undefined && data[key] !== null,
-    );
+    const columns = safeColumnsFrom(data);
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => data[key]);
 
@@ -113,8 +112,8 @@ export async function insertCheckInOutSqlite(db, data) {
 /**
  * Reads visits where one column equals a value, sorted.
  *
- * `key`, `orderBy` and `order` go directly into the SQL, so only pass
- * trusted values from code.
+ * `key` and `orderBy` are checked with safeColumn and `order` with
+ * safeSortOrder (SqlSafety.js); invalid values are logged and [] is returned.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key - column to filter on (e.g. "assignment_id")
@@ -132,7 +131,7 @@ export async function selectCheckInOutSqlite(
 ) {
   try {
     return await db.getAllAsync(
-      `SELECT * FROM visit WHERE ${key} = ? ORDER BY ${orderBy} ${order}`,
+      `SELECT * FROM visit WHERE ${safeColumn(key)} = ? ORDER BY ${safeColumn(orderBy)} ${safeSortOrder(order)}`,
       [value],
     );
   } catch (error) {

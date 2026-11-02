@@ -8,6 +8,7 @@
 import axios from "axios";
 
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -101,9 +102,7 @@ export async function insertWorkOrderSqlite(db, data) {
 
     const newData = { ...customer, ...newJobData, ...workOrder };
 
-    const columns = Object.keys(newData).filter(
-      (key) => newData[key] !== undefined && newData[key] !== null,
-    );
+    const columns = safeColumnsFrom(newData);
 
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => newData[key]);
@@ -119,8 +118,9 @@ export async function insertWorkOrderSqlite(db, data) {
 /**
  * Reads work orders where one column equals a value.
  *
- * Example: selectWorkOrderSqlite(db, "id", 42). `key` is placed directly in
- * the SQL, so only pass trusted column names.
+ * Example: selectWorkOrderSqlite(db, "id", 42).
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key - column to filter on
@@ -129,7 +129,7 @@ export async function insertWorkOrderSqlite(db, data) {
  */
 export async function selectWorkOrderSqlite(db, key, value) {
   try {
-    return await db.getAllAsync(`SELECT * FROM assignment WHERE ${key} = ?`, [
+    return await db.getAllAsync(`SELECT * FROM assignment WHERE ${safeColumn(key)} = ?`, [
       value,
     ]);
   } catch (error) {
@@ -141,7 +141,8 @@ export async function selectWorkOrderSqlite(db, key, value) {
  * Sets one column on the work orders that match a condition.
  *
  * Runs: UPDATE assignment SET key1 = value1 WHERE key2 = value2.
- * Column names are placed directly in the SQL, so only pass trusted names.
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key1 - column to change
@@ -152,7 +153,7 @@ export async function selectWorkOrderSqlite(db, key, value) {
 export async function updateWorkOrderSqlite(db, key1, value1, key2, value2) {
   try {
     await db.runAsync(
-      `UPDATE assignment SET ${key1} = ? WHERE ${key2} = ?`,
+      `UPDATE assignment SET ${safeColumn(key1)} = ? WHERE ${safeColumn(key2)} = ?`,
       [value1, value2],
     );
   } catch (error) {

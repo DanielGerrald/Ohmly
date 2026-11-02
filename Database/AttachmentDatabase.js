@@ -16,6 +16,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -196,9 +197,7 @@ export async function getAttachmentsApi(token, id) {
  * @param {Object} obj - attachment fields
  */
 async function insertOneAttachment(db, obj) {
-  const columns = Object.keys(obj).filter(
-    (key) => obj[key] !== undefined && obj[key] !== null,
-  );
+  const columns = safeColumnsFrom(obj);
   const placeholders = columns.map(() => "?").join(", ");
   const values = columns.map((key) => obj[key]);
 
@@ -230,7 +229,8 @@ export async function insertAttachmentSqlite(db, data) {
  *
  * Example: selectAttachmentSqlite(db, "assignment_id", 12, "type", "Photo").
  * The second condition is only applied if both key2 and value2 are given.
- * Column names are placed directly in the SQL, so only pass trusted names.
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db
  * @param {string} key1 - first column to filter on
@@ -241,11 +241,11 @@ export async function insertAttachmentSqlite(db, data) {
  */
 export async function selectAttachmentSqlite(db, key1, value1, key2, value2) {
   try {
-    let query = `SELECT * FROM attachment WHERE ${key1} = ?`;
+    let query = `SELECT * FROM attachment WHERE ${safeColumn(key1)} = ?`;
     const values = [value1];
 
     if (key2 && value2) {
-      query += ` AND ${key2} = ?`;
+      query += ` AND ${safeColumn(key2)} = ?`;
       values.push(value2);
     }
 
@@ -270,11 +270,9 @@ export async function updateAttachmentSqlite(db, data) {
     const fieldsToUpdate = [];
     const values = [];
 
-    for (const [key, value] of Object.entries(data)) {
-      if (key !== "id" && value !== undefined && value !== null) {
-        fieldsToUpdate.push(`${key} = ?`);
-        values.push(value);
-      }
+    for (const key of safeColumnsFrom(data, ["id"])) {
+      fieldsToUpdate.push(`${key} = ?`);
+      values.push(data[key]);
     }
     await db.runAsync(
       `UPDATE attachment SET ${fieldsToUpdate.join(", ")} WHERE fileName = ?`,

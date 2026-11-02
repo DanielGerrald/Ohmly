@@ -9,6 +9,7 @@
 
 import axios from "axios";
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
@@ -46,9 +47,7 @@ export async function getLabelsApi(idToken) {
  */
 async function insertCategoryTypeRows(db, rows) {
   for (const row of rows) {
-    const columns = Object.keys(row).filter(
-      (key) => row[key] !== undefined && row[key] !== null,
-    );
+    const columns = safeColumnsFrom(row);
     if (columns.length === 0) continue;
 
     const placeholders = columns.map(() => "?").join(", ");
@@ -111,8 +110,8 @@ export async function insertCategoryLabelSqlite(db, labels) {
  * Reads labels from SQLite filtered by one column.
  *
  * Example: selectCategoryLabelSqlite(db, "type_group", "Photo Label").
- * Note: `key` is inserted directly into the SQL, so only pass trusted column
- * names from code, never user input.
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
  *
  * @param {SQLiteDatabase} db - open expo-sqlite database
  * @param {string} key - column name to filter on
@@ -122,7 +121,7 @@ export async function insertCategoryLabelSqlite(db, labels) {
 export async function selectCategoryLabelSqlite(db, key, value) {
   try {
     return await db.getAllAsync(
-      `SELECT * FROM category_type WHERE ${key} = ?`,
+      `SELECT * FROM category_type WHERE ${safeColumn(key)} = ?`,
       [value],
     );
   } catch (error) {

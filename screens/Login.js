@@ -25,6 +25,7 @@ import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import * as Network from "expo-network";
 import { IconButton } from "react-native-paper";
+import { getUnixTime } from "date-fns";
 
 import {
   getLoginApi,
@@ -68,6 +69,28 @@ import Version from "../components/ui/Version";
 import { useSQLiteContext } from "expo-sqlite";
 import { BLURHASH } from "../components/constants";
 import Colors from "../constants/colors";
+
+/**
+ * Turns a failed Firebase sign-in into a message for the user.
+ *
+ * Firebase returns an error code such as INVALID_LOGIN_CREDENTIALS,
+ * TOO_MANY_ATTEMPTS_TRY_LATER or USER_DISABLED (sometimes followed by
+ * " : extra details").
+ *
+ * @param {Object} error - axios error from getLoginApi (has a response)
+ * @returns {string}
+ */
+function loginErrorMessage(error) {
+  const code = String(error.response?.data?.error?.message ?? "").split(" ")[0];
+  switch (code) {
+    case "TOO_MANY_ATTEMPTS_TRY_LATER":
+      return "Too many failed attempts. Please wait a few minutes and try again.";
+    case "USER_DISABLED":
+      return "This account has been disabled. Please contact your coordinator.";
+    default:
+      return "Username and/or password is incorrect";
+  }
+}
 
 /**
  * Renders the login form (username/email, password with show/hide toggle,
@@ -163,17 +186,18 @@ export default function Login() {
    *
    * How it works:
    * 1. Requires both fields to be filled in.
-   * 2. Checks the network and calls Firebase sign-in. If the internet isn't
-   *    reachable it falls back to handleOfflineLogin.
-   *    Note: getLoginApi runs before the offline check and throws when there
-   *    is no connection, so in practice a fully offline device ends up in the
-   *    catch block ("An error occurred") rather than the offline login path.
-   * 3. Loads the user's profile and avatar and saves/updates the local user
+   * 2. Checks the network first. If the device is offline it uses
+   *    handleOfflineLogin instead of calling Firebase.
+   * 3. Calls Firebase sign-in. If the request gets no response at all (the
+   *    network dropped or the internet isn't really reachable) it also falls
+   *    back to handleOfflineLogin. If Firebase rejects the login, a message
+   *    explains why (wrong credentials, too many attempts, disabled account).
+   * 4. Loads the user's profile and avatar and saves/updates the local user
    *    row (marking them logged in with the current time as last_login).
-   * 4. Re-reads the user and verifies the token isn't expired.
-   * 5. Downloads all jobs and labels; removes local data for jobs that no
+   * 5. Re-reads the user and verifies the token isn't expired.
+   * 6. Downloads all jobs and labels; removes local data for jobs that no
    *    longer exist, stores the labels and syncs each job (syncJob).
-   * 6. Calls login() from AuthContext, which switches to the main app.
+   * 7. Calls login() from AuthContext, which switches to the main app.
    * Any error shows a generic alert.
    */
   async function onSubmit() {
@@ -188,10 +212,27 @@ export default function Login() {
 
     try {
       const networkState = await Network.getNetworkStateAsync();
-      const apiLoginData = await getLoginApi(formData);
+      // isInternetReachable can be null while the OS is still checking, so
+      // only treat an explicit false (or no connection at all) as offline.
+      const offline =
+        !networkState.isConnected || networkState.isInternetReachable === false;
 
-      if (!networkState.isInternetReachable) {
+      if (offline) {
         await handleOfflineLogin();
+        return;
+      }
+
+      let apiLoginData;
+      try {
+        apiLoginData = await getLoginApi(formData);
+      } catch (error) {
+        if (!error.response) {
+          // No reply from the server: the connection isn't actually usable.
+          await handleOfflineLogin();
+          return;
+        }
+        setLoading(false);
+        Alert.alert(loginErrorMessage(error));
         return;
       }
 
@@ -213,6 +254,7 @@ export default function Login() {
         ...userProfile,
         ...(avatar ? { avatar } : {}),
         logged_in: 1,
+        last_login: getUnixTime(new Date()),
       };
 
       if (!existingUser) {
@@ -267,9 +309,10 @@ export default function Login() {
    * Lets a previously-logged-in user in without internet.
    *
    * How it works: looks the user up in SQLite by the email typed in. If they
-   * exist and their saved token hasn't expired, they're logged in with the
-   * cached data; otherwise an alert explains they need internet. The password
-   * is not checked in this path.
+   * exist and their saved token hasn't expired, they're marked as logged in
+   * (logged_in = 1, last_login = now) in SQLite and signed in with the cached
+   * data; otherwise an alert explains they need internet. The password is
+   * not checked in this path.
    */
   async function handleOfflineLogin() {
     setLoading(false);
@@ -285,7 +328,16 @@ export default function Login() {
         "Try again when you have internet access",
       );
     } else {
-      login(sqliteUserData);
+      // Mark this user as the logged-in one in SQLite too; AuthContext's
+      // periodic session check reads it from there and would otherwise log
+      // them straight back out.
+      const offlineUser = {
+        ...sqliteUserData,
+        logged_in: 1,
+        last_login: getUnixTime(new Date()),
+      };
+      await updateUserSqlite(db, offlineUser);
+      login(offlineUser);
     }
   }
 
