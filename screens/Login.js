@@ -1,3 +1,11 @@
+/**
+ * Login screen.
+ *
+ * Signs the technician in with Firebase, saves their profile to SQLite and
+ * downloads their jobs before showing the main app, so everything is
+ * available offline right after login.
+ */
+
 import { Image } from "expo-image";
 import {
   Alert,
@@ -17,6 +25,7 @@ import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import * as Network from "expo-network";
 import { IconButton } from "react-native-paper";
+import { getUnixTime } from "date-fns";
 
 import {
   getLoginApi,
@@ -55,12 +64,42 @@ import {
   insertFinalCheckOutSqlite,
   selectFinalCheckOutSqlite,
 } from "../Database/FinalCheckOutDatabase";
+import {
+  saveOfflineCredential,
+  verifyOfflineCredential,
+} from "../Database/OfflineCredentials";
 import Loading from "../components/ui/Loading";
 import Version from "../components/ui/Version";
 import { useSQLiteContext } from "expo-sqlite";
 import { BLURHASH } from "../components/constants";
 import Colors from "../constants/colors";
 
+/**
+ * Turns a failed Firebase sign-in into a message for the user.
+ *
+ * Firebase returns an error code such as INVALID_LOGIN_CREDENTIALS,
+ * TOO_MANY_ATTEMPTS_TRY_LATER or USER_DISABLED (sometimes followed by
+ * " : extra details").
+ *
+ * @param {Object} error - axios error from getLoginApi (has a response)
+ * @returns {string}
+ */
+function loginErrorMessage(error) {
+  const code = String(error.response?.data?.error?.message ?? "").split(" ")[0];
+  switch (code) {
+    case "TOO_MANY_ATTEMPTS_TRY_LATER":
+      return "Too many failed attempts. Please wait a few minutes and try again.";
+    case "USER_DISABLED":
+      return "This account has been disabled. Please contact your coordinator.";
+    default:
+      return "Username and/or password is incorrect";
+  }
+}
+
+/**
+ * Renders the login form (username/email, password with show/hide toggle,
+ * "Forgot Password?" link, LOGIN button and sign-up link).
+ */
 export default function Login() {
   const { login } = useAuth();
   const navigation = useNavigation();
@@ -73,10 +112,28 @@ export default function Login() {
     password: "",
   });
 
+  /**
+   * Updates one field of the form state.
+   *
+   * @param {"username"|"password"} name - field to update
+   * @param {string} value - new text
+   */
   const handleInputChange = (name, value) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  /**
+   * Saves one job and its related data to SQLite during login.
+   *
+   * How it works: upserts the work order; if the server marks it completed,
+   * sets its local status to "Completed" and downloads the completion
+   * checklist (if not stored yet). Then downloads and stores the job's
+   * contacts, and its attachments (only those not already stored). The
+   * attachment folder id is the part of the site's reference_code after "-".
+   *
+   * @param {Object} job - one item from getAssignmentsApi
+   * @param {string} idToken - Firebase ID token
+   */
   async function syncJob(job, idToken) {
     await insertWorkOrderSqlite(db, job);
 
@@ -128,6 +185,25 @@ export default function Login() {
     }
   }
 
+  /**
+   * Handles the LOGIN button.
+   *
+   * How it works:
+   * 1. Requires both fields to be filled in.
+   * 2. Checks the network first. If the device is offline it uses
+   *    handleOfflineLogin instead of calling Firebase.
+   * 3. Calls Firebase sign-in. If the request gets no response at all (the
+   *    network dropped or the internet isn't really reachable) it also falls
+   *    back to handleOfflineLogin. If Firebase rejects the login, a message
+   *    explains why (wrong credentials, too many attempts, disabled account).
+   * 4. Loads the user's profile and avatar and saves/updates the local user
+   *    row (marking them logged in with the current time as last_login).
+   * 5. Re-reads the user and verifies the token isn't expired.
+   * 6. Downloads all jobs and labels; removes local data for jobs that no
+   *    longer exist, stores the labels and syncs each job (syncJob).
+   * 7. Calls login() from AuthContext, which switches to the main app.
+   * Any error shows a generic alert.
+   */
   async function onSubmit() {
     const { username, password } = formData;
 
@@ -140,10 +216,27 @@ export default function Login() {
 
     try {
       const networkState = await Network.getNetworkStateAsync();
-      const apiLoginData = await getLoginApi(formData);
+      // isInternetReachable can be null while the OS is still checking, so
+      // only treat an explicit false (or no connection at all) as offline.
+      const offline =
+        !networkState.isConnected || networkState.isInternetReachable === false;
 
-      if (!networkState.isInternetReachable) {
+      if (offline) {
         await handleOfflineLogin();
+        return;
+      }
+
+      let apiLoginData;
+      try {
+        apiLoginData = await getLoginApi(formData);
+      } catch (error) {
+        if (!error.response) {
+          // No reply from the server: the connection isn't actually usable.
+          await handleOfflineLogin();
+          return;
+        }
+        setLoading(false);
+        Alert.alert(loginErrorMessage(error));
         return;
       }
 
@@ -165,6 +258,7 @@ export default function Login() {
         ...userProfile,
         ...(avatar ? { avatar } : {}),
         logged_in: 1,
+        last_login: getUnixTime(new Date()),
       };
 
       if (!existingUser) {
@@ -174,6 +268,12 @@ export default function Login() {
       }
 
       const updatedUser = await selectUserSqlite(db, apiLoginData.localId);
+
+      // Remember a hash of this password so the user can log in offline
+      // later. Runs in the background so it doesn't slow down this login.
+      saveOfflineCredential(apiLoginData.localId, password).catch((error) =>
+        console.warn("Could not save offline credential:", error),
+      );
 
       if (!updatedUser) {
         setLoading(false);
@@ -215,24 +315,61 @@ export default function Login() {
     }
   }
 
+  /**
+   * Lets a previously-logged-in user in without internet.
+   *
+   * How it works:
+   * 1. Looks the user up in SQLite by the email typed in.
+   * 2. Checks the typed password against the hash saved at their last online
+   *    login (see Database/OfflineCredentials.js). If no hash exists yet
+   *    (they haven't logged in online since this check was added), offline
+   *    login is refused and they're asked to log in online once.
+   * 3. Checks their saved token hasn't expired.
+   * 4. Marks them as logged in (logged_in = 1, last_login = now) in SQLite
+   *    and signs them in with the cached data.
+   * Any failed step shows an alert and stops.
+   */
   async function handleOfflineLogin() {
-    setLoading(false);
     const sqliteUserData = await selectUserByEmailSqlite(db, formData.username);
+    const passwordCheck = sqliteUserData
+      ? await verifyOfflineCredential(sqliteUserData.localId, formData.password)
+      : null;
+    setLoading(false);
+
     if (!sqliteUserData) {
       Alert.alert(
         "The username does not exist!",
         "Try again when you have internet access",
       );
+    } else if (passwordCheck === "missing") {
+      Alert.alert(
+        "Offline login not set up",
+        "Connect to the internet and log in once to enable offline login on this device.",
+      );
+    } else if (passwordCheck !== "ok") {
+      Alert.alert("Username and/or password is incorrect");
     } else if (await isTokenExpired(sqliteUserData.idToken)) {
       Alert.alert(
         "Session expired.",
         "Try again when you have internet access",
       );
     } else {
-      login(sqliteUserData);
+      // Mark this user as the logged-in one in SQLite too; AuthContext's
+      // periodic session check reads it from there and would otherwise log
+      // them straight back out.
+      const offlineUser = {
+        ...sqliteUserData,
+        logged_in: 1,
+        last_login: getUnixTime(new Date()),
+      };
+      await updateUserSqlite(db, offlineUser);
+      login(offlineUser);
     }
   }
 
+  /**
+   * Shows or hides the password text.
+   */
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
@@ -326,6 +463,9 @@ export default function Login() {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

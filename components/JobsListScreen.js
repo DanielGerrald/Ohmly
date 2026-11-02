@@ -1,3 +1,7 @@
+/**
+ * Shared layout for the "Active Jobs" and "Completed Jobs" tabs.
+ */
+
 import { Dimensions, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -11,6 +15,20 @@ import AppSyncManager from "./AppSyncManager";
 import { BLURHASH, SAFE_AREA_EDGES } from "./constants";
 import Colors from "../constants/colors";
 
+/**
+ * Shows the logo, a title and a list of job cards (or an empty-state card).
+ *
+ * How it works: reads all jobs from the Job context, filters them with
+ * `filterJobs` (memoized so it only re-runs when the jobs change) and
+ * renders them inside AppSyncManager so the list supports pull-to-refresh.
+ *
+ * @param {Object} props
+ * @param {string} props.title - heading under the logo
+ * @param {string} props.emptyMessage - text shown when no jobs match
+ * @param {(jobs: Array) => Array} props.filterJobs - picks which jobs to show
+ * @param {boolean} [props.showLoadingGate=false] - show a full-screen
+ *   spinner while the first sync is still loading jobs
+ */
 export default function JobsListScreen({
   title,
   emptyMessage,
@@ -59,6 +77,9 @@ export default function JobsListScreen({
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

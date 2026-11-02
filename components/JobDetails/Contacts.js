@@ -1,3 +1,7 @@
+/**
+ * "Contacts" tab of the job details modal.
+ */
+
 import {
   Dimensions,
   KeyboardAvoidingView,
@@ -13,14 +17,32 @@ import * as Linking from "expo-linking";
 import OpenMap from "./OpenMap";
 import Colors from "../../constants/colors";
 
+/**
+ * Shows the job site's address and phone, the field coordinator (account
+ * manager) and the after-hours number. Buttons open directions in a maps
+ * app or start a phone call. The buttons are disabled (faded) once the job
+ * is completed.
+ *
+ * @param {Object} props
+ * @param {Array<Object>} props.selectedJob - job row in a one-item array
+ * @param {Array<Object>} props.contacts - contact row(s) for the job
+ */
 export default function Contacts({ selectedJob, contacts }) {
   const isCompleted = selectedJob[0]?.status_label === "Completed";
 
+  /**
+   * Calls the field coordinator's phone number (falls back to a placeholder
+   * number if none is stored).
+   */
   function CoordinatorCall() {
     const number = contacts?.[0]?.account_manager_phone_nbr || "704-555-0100";
     Linking.openURL(`tel:${number}`);
   }
 
+  /**
+   * Calls the after-hours number (falls back to a placeholder number if none
+   * is stored).
+   */
   function AftHrsCall() {
     const number = contacts?.[0]?.account_manager_after_hours_nbr || "704-555-0100";
     Linking.openURL(`tel:${number}`);
@@ -151,6 +173,9 @@ export default function Contacts({ selectedJob, contacts }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

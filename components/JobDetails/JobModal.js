@@ -1,3 +1,7 @@
+/**
+ * Full-screen job details view, opened by tapping a job card.
+ */
+
 import {
   Dimensions,
   View,
@@ -29,6 +33,25 @@ import { useSQLiteContext } from "expo-sqlite";
 import { selectAttachmentSqlite } from "../../Database/AttachmentDatabase";
 import Colors from "../../constants/colors";
 
+/**
+ * Shows a job's header (type, reference, site, scheduled date, category),
+ * the check-in/out panel (hidden once the job is completed) and a tabbed
+ * section: Details, Contacts, Files, Photos and Final Check-Out.
+ *
+ * How it works: whenever the selected job changes or a sync finishes, it
+ * loads the job's visits (newest first) and saved completion form from
+ * SQLite. The job counts as "checked in" if the newest visit is a check-in
+ * (departing = 0). Only one tab is visible at a time; the show* flags are
+ * switched by JobNav (and by CheckInOut, which jumps to the Final Check-Out
+ * tab when the technician checks out with the work completed).
+ *
+ * @param {Object} props
+ * @param {boolean} props.visible - whether the modal is open
+ * @param {() => void} props.onDismiss - closes the modal
+ * @param {Array<Object>} props.selectedJob - the job row in a one-item
+ *   array (empty array = nothing selected, renders nothing)
+ * @param {Array<Object>} props.selectedContact - the job's contact row(s)
+ */
 export default function JobModal({
   visible,
   onDismiss,
@@ -53,6 +76,11 @@ export default function JobModal({
     let isMounted = true;
     ScreenOrientation.unlockAsync();
 
+    /**
+     * Loads the job's visits and completion form from SQLite and works out
+     * whether the technician is currently checked in. Skips state updates if
+     * the modal was closed while loading.
+     */
     async function fetchCheckinData() {
       try {
         if (!selectedJob?.[0]?.id) return;
@@ -94,6 +122,9 @@ export default function JobModal({
     };
   }, [selectedJob, syncVersion]);
 
+  /**
+   * Loads this job's photo attachments from SQLite (used by the Photos tab).
+   */
   const fetchPhotos = async () => {
     try {
       const photos = await selectAttachmentSqlite(
@@ -109,6 +140,9 @@ export default function JobModal({
     }
   };
 
+  /**
+   * Loads this job's document attachments from SQLite (used by the Files tab).
+   */
   const fetchFiles = async () => {
     try {
       const files = await selectAttachmentSqlite(
@@ -310,6 +344,9 @@ export default function JobModal({
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

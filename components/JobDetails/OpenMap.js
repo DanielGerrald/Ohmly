@@ -1,5 +1,25 @@
+/**
+ * Opens turn-by-turn directions to a job site in a maps app.
+ */
+
 import { Platform, Linking, ActionSheetIOS, Alert } from "react-native";
 
+/**
+ * Lets the user pick a maps app and opens directions to the given point.
+ *
+ * How it works:
+ * 1. Validates the coordinates (numbers within normal lat/lng ranges).
+ * 2. Builds links for Apple Maps, Google Maps (app scheme on iOS, geo: on
+ *    Android) and Waze, plus web fallbacks.
+ * 3. Keeps only the apps the device can open; if none, offers Google Maps
+ *    and Waze in the browser.
+ * 4. Shows an action sheet (iOS) or an alert with buttons (Android) to
+ *    choose one, then opens that link.
+ *
+ * @param {number|string} latitude
+ * @param {number|string} longitude
+ * @param {string} [label] - place name shown as the destination
+ */
 export default async function OpenMap(latitude, longitude, label) {
   const lat = Number(latitude);
   const lng = Number(longitude);

@@ -1,14 +1,34 @@
+/**
+ * Full-screen signature pad used by the final check-out form for the
+ * manager's sign-off.
+ */
+
 import { useRef } from "react";
 import { Dimensions, View, TouchableOpacity, Text, StyleSheet } from "react-native";
 import Signature from "react-native-signature-canvas";
 import Colors from "../constants/colors";
 
+/**
+ * Shows a drawing canvas with Clear, Save and Cancel buttons.
+ *
+ * @param {Object} props
+ * @param {(show: boolean) => void} props.setShowSignatureScreen - hides
+ *   this screen when called with false
+ * @param {(dataUrl: string) => void} props.setSignature - receives the
+ *   signature as a base64 PNG data URL when the user taps Save
+ */
 export default function SignatureScreen({
   setShowSignatureScreen,
   setSignature,
 }) {
   const ref = useRef();
 
+  /**
+   * Called by the signature canvas after readSignature(): passes the image to
+   * the parent and closes the screen.
+   *
+   * @param {string} signatureDataUrl - "data:image/png;base64,..."
+   */
   async function handleOK(signatureDataUrl) {
     try {
       setSignature(signatureDataUrl);
@@ -18,10 +38,16 @@ export default function SignatureScreen({
     }
   }
 
+  /**
+   * Erases everything drawn on the canvas.
+   */
   function handleClear() {
     ref.current?.clearSignature();
   }
 
+  /**
+   * Asks the canvas to export the drawing; the result arrives in handleOK.
+   */
   function handleConfirm() {
     ref.current?.readSignature();
   }
@@ -51,6 +77,9 @@ export default function SignatureScreen({
   );
 }
 
+/**
+ * Shared drop-shadow style for the buttons.
+ */
 const shadowStyle = {
   elevation: 6,
   shadowColor: "black",
@@ -60,6 +89,9 @@ const shadowStyle = {
 };
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

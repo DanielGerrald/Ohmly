@@ -1,3 +1,7 @@
+/**
+ * Blue banner that warns the technician there is unsynced offline work.
+ */
+
 import { useEffect, useRef, useState } from "react";
 import { AppState, View, Text } from "react-native";
 import { useSQLiteContext } from "expo-sqlite";
@@ -5,8 +9,20 @@ import { selectAttachmentSqlite } from "../Database/AttachmentDatabase";
 import { selectCheckInOutSqlite } from "../Database/CheckInOutDatabase";
 import { selectFinalCheckOutSqlite } from "../Database/FinalCheckOutDatabase";
 
+/**
+ * How often to re-check SQLite for pending items while the app is open.
+ */
 const POLL_MS_WHEN_ACTIVE = 2000; // poll while app is foregrounded
 
+/**
+ * Shows "Offline items pending..." while anything is waiting to be uploaded.
+ *
+ * How it works: every 2 seconds (only while the app is in the foreground)
+ * it counts rows with syncStatus "Pending" in the attachment, visit and
+ * completion tables. If any exist the banner is shown, otherwise hidden.
+ * Polling stops when the app goes to the background and restarts (with an
+ * immediate check) when it comes back.
+ */
 export default function BannerOnPendingSync() {
   const db = useSQLiteContext();
   const [bannerVisible, setBannerVisible] = useState(false);
@@ -14,6 +30,9 @@ export default function BannerOnPendingSync() {
   const appStateRef = useRef(AppState.currentState);
   const intervalRef = useRef(null);
 
+  /**
+   * Counts pending attachments, check-ins/outs and final check-outs and shows/hides the banner.
+   */
   const checkPendingItems = async () => {
     try {
       const [attachments, checkIns, finals] = await Promise.all([
@@ -41,10 +60,16 @@ export default function BannerOnPendingSync() {
     }
   };
 
+  /**
+   * Starts the 2-second polling interval (only one at a time).
+   */
   const startPolling = () => {
     if (intervalRef.current) return;
     intervalRef.current = setInterval(checkPendingItems, POLL_MS_WHEN_ACTIVE);
   };
+  /**
+   * Stops the polling interval.
+   */
   const stopPolling = () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);

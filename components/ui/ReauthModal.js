@@ -1,3 +1,8 @@
+/**
+ * Password prompt shown when Firebase requires a recent login (for example
+ * before changing the account email).
+ */
+
 import { useState } from "react";
 import {
   Alert,
@@ -12,15 +17,32 @@ import {
 import CustomInput from "./CustomInput";
 import Colors from "../../constants/colors";
 
+/**
+ * Modal asking the user to re-enter their password.
+ *
+ * @param {Object} props
+ * @param {boolean} props.visible - whether the modal is shown
+ * @param {() => void} props.onCancel - called when the user cancels
+ * @param {(password: string) => Promise<void>} props.onConfirm - called with
+ *   the typed password; the Confirm button shows "Verifying..." and is
+ *   disabled until it finishes
+ */
 export default function ReauthModal({ visible, onCancel, onConfirm }) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * Clears the typed password and tells the parent the user cancelled.
+   */
   const handleCancel = () => {
     setPassword("");
     onCancel();
   };
 
+  /**
+   * Requires a password, then calls onConfirm with it. The password field is
+   * cleared only if onConfirm succeeds; the submitting state is always reset.
+   */
   const handleConfirm = async () => {
     if (!password) {
       Alert.alert("Please enter your password");
@@ -80,6 +102,9 @@ export default function ReauthModal({ visible, onCancel, onConfirm }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

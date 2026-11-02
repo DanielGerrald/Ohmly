@@ -1,6 +1,13 @@
+/**
+ * Icon tab bar inside the job details modal.
+ */
+
 import { StyleSheet } from "react-native";
 import { Card, IconButton } from "react-native-paper";
 
+/**
+ * Tabs in display order: key and Material icon name.
+ */
 const TABS = [
   { key: "details", icon: "format-list-bulleted" },
   { key: "contacts", icon: "contacts" },
@@ -9,6 +16,12 @@ const TABS = [
   { key: "finalCheckOut", icon: "clipboard-check" },
 ];
 
+/**
+ * Row of icon buttons that switch between the job detail tabs. The active
+ * tab's icon is white, the others dark.
+ *
+ * Receives a show/set pair for each tab from JobModal.
+ */
 export default function JobNav({
   showDetails,
   setShowDetails,
@@ -36,6 +49,11 @@ export default function JobNav({
     finalCheckOut: setShowFinalCheckOut,
   };
 
+  /**
+   * Shows the chosen tab and hides all others.
+   *
+   * @param {string} key - tab key from TABS
+   */
   const selectTab = (key) => {
     for (const tab of TABS) {
       setActive[tab.key](tab.key === key);

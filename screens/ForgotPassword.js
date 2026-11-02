@@ -1,3 +1,7 @@
+/**
+ * Forgot-password screen: sends a Firebase password reset email.
+ */
+
 import {
   Dimensions,
   StyleSheet,
@@ -19,11 +23,23 @@ import { postRecoverPasswordAPI } from "../Database/UserDatabase";
 import { BLURHASH } from "../components/constants";
 import Colors from "../constants/colors";
 
+/**
+ * Renders an email field, a "Send Recovery Email" button and a back arrow
+ * to the Login screen.
+ *
+ * @param {{navigation: Object}} props - React Navigation prop
+ */
 export default function ForgotPassword({ navigation }) {
   const [formData, setFormData] = useState({
     Username: "",
   });
 
+  /**
+   * Updates one field of the form state.
+   *
+   * @param {string} name - field name ("Username")
+   * @param {string} value - new text
+   */
   const handleInputChange = (name, value) => {
     setFormData({
       ...formData,
@@ -31,6 +47,13 @@ export default function ForgotPassword({ navigation }) {
     });
   };
 
+  /**
+   * Sends the reset email.
+   *
+   * How it works: requires an email, calls postRecoverPasswordAPI and shows
+   * whatever message it returns (success text or the Firebase error), then
+   * navigates back to the Login screen.
+   */
   const onSubmit = async () => {
     const { Username } = formData;
 
@@ -111,6 +134,9 @@ export default function ForgotPassword({ navigation }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

@@ -1,3 +1,8 @@
+/**
+ * Check In / Check Out button and its popup, shown in the job details
+ * modal for jobs that aren't completed.
+ */
+
 import {
   Dimensions,
   Keyboard,
@@ -26,6 +31,29 @@ import { getUnixTime } from "date-fns";
 import * as Network from "expo-network";
 import Colors from "../../constants/colors";
 
+/**
+ * Shows "Check In" or "Check Out" depending on the current state, and a
+ * popup to add a comment before submitting.
+ *
+ * Flow:
+ * - Check In: opens the comment box; submitting records a check-in.
+ * - Check Out: first asks "Are you performing a final checkout?".
+ *   - Yes: closes the popup and opens the Final Check-Out form instead.
+ *     No check-out visit is recorded in this case; submitting that form
+ *     marks the job completed.
+ *   - No: shows the comment box; submitting records a normal check-out.
+ *
+ * @param {Object} props
+ * @param {Function} props.setShowDetails - tab visibility setters from
+ *   JobModal (setShowDetails, setShowContacts, setShowFiles, setShowPhotos,
+ *   setShowFinalCheckOut) so the right tab is shown
+ * @param {Function} props.setCheckoutFormVisible - opens the final
+ *   check-out form
+ * @param {number} props.jobPurchaseOrderID - work order id
+ * @param {boolean} props.checkedIn - whether the technician is on site
+ * @param {Function} props.setCheckedIn - toggles that state
+ * @param {Function} props.setCheckInOutData - appends to the visit list
+ */
 export default function CheckInOut({
   setShowDetails,
   setShowContacts,
@@ -46,12 +74,28 @@ export default function CheckInOut({
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * Closes the popup and resets which part of it is shown.
+   */
   const hideModal = () => {
     setModalVisible(false);
     setCommentVisible(false);
     setCheckOutQuestion(false);
   };
 
+  /**
+   * Records a check-in or check-out with the typed comment.
+   *
+   * How it works: builds a visit record (timestamp = now in unix seconds,
+   * departing = 1 for check-out, crew_member_id = current user). If online
+   * it uploads the visit first; on success it is saved locally as synced
+   * ("Yes") and the job's `checked_in` flag is updated on the server. If
+   * offline or the upload fails, it is saved locally as "Pending" for the
+   * background sync to send later. The new visit is added to the on-screen
+   * list and the comment box is cleared. Ignores double taps while running.
+   *
+   * @param {boolean} isCheckingOut - true for check-out, false for check-in
+   */
   async function onSubmitCheckin(isCheckingOut) {
     if (submitting) return;
 
@@ -260,6 +304,9 @@ export default function CheckInOut({
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

@@ -1,8 +1,25 @@
+/**
+ * Contacts for a work order: the site/store contact, the account manager
+ * (job coordinator) and the vendor contact. Downloaded per job and cached
+ * in the local `contact` table (one row per work order).
+ */
+
 import axios from "axios";
 import { environment } from "../Config";
+import { safeColumn, safeColumnsFrom } from "./SqlSafety";
 
 //---------------API Functions---------------//
 
+/**
+ * Downloads the contacts for one work order.
+ *
+ * How it works: GET `/CONTACTS/{id}.json` with the user's ID token.
+ *
+ * @param {string} idToken - Firebase ID token
+ * @param {number|string} id - work order id
+ * @returns {Promise<Object|undefined>} object with `site_contact`,
+ *   `account_manager` and `vendor_contact`, or undefined if none/error
+ */
 export async function getWorkOrderContactsApi(idToken, id) {
   try {
     const response = await axios.get(
@@ -20,6 +37,18 @@ export async function getWorkOrderContactsApi(idToken, id) {
 
 //---------------SQLITE Functions---------------//
 
+/**
+ * Saves the contacts for one work order into SQLite.
+ *
+ * How it works: the three nested contact objects are flattened into a single
+ * row using column prefixes (site_contact_*, account_manager_*,
+ * vendor_contact_*), then upserted with `INSERT OR REPLACE` keyed by
+ * assignment_id. Empty values are skipped.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Object} contact - result of getWorkOrderContactsApi
+ * @param {number} assignmentId - work order the contacts belong to
+ */
 export async function insertContactSqlite(db, contact, assignmentId) {
   try {
     const storeContact = {
@@ -68,9 +97,7 @@ export async function insertContactSqlite(db, contact, assignmentId) {
       assignment_id: assignmentId,
     };
 
-    const columns = Object.keys(data).filter(
-      (key) => data[key] !== undefined && data[key] !== null,
-    );
+    const columns = safeColumnsFrom(data);
     const placeholders = columns.map(() => "?").join(", ");
     const values = columns.map((key) => data[key]);
 
@@ -83,9 +110,20 @@ export async function insertContactSqlite(db, contact, assignmentId) {
   }
 }
 
+/**
+ * Reads contact rows where one column equals a value
+ * (usually key = "assignment_id").
+ * Column names are checked with safeColumn (SqlSafety.js); an invalid
+ * name is logged and the query is not run.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {string} key - column to filter on
+ * @param {*} value - value to match
+ * @returns {Promise<Array<Object>|undefined>} matching rows
+ */
 export async function selectContactSqlite(db, key, value) {
   try {
-    return await db.getAllAsync(`SELECT * FROM contact WHERE ${key} = ?`, [
+    return await db.getAllAsync(`SELECT * FROM contact WHERE ${safeColumn(key)} = ?`, [
       value,
     ]);
   } catch (error) {
@@ -93,6 +131,13 @@ export async function selectContactSqlite(db, key, value) {
   }
 }
 
+/**
+ * Deletes contacts for work orders that no longer exist on the server
+ * (or clears the table if the server returned none).
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Array<Object>} value - latest result of getAssignmentsApi
+ */
 export async function cleanupContactSqlite(db, value) {
   try {
     const workOrderIds = (value ?? []).map((item) => item.assignment.id);
