@@ -1,3 +1,11 @@
+/**
+ * "Final Check-Out" tab of the job details modal.
+ *
+ * Shows the job's work log (check-in/out history), the completion
+ * checklist form used to close out a job, and, for completed jobs, a
+ * summary of what was submitted with an option to reopen the job.
+ */
+
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -35,6 +43,17 @@ import * as Network from "expo-network";
 import { useJob } from "../Context";
 import Colors from "../../constants/colors";
 
+/**
+ * One line of the completed-job summary: an icon, a label and value, plus
+ * an optional muted second line (e.g. the description for a "Yes" answer).
+ *
+ * @param {Object} props
+ * @param {string} props.icon - Material icon name
+ * @param {string} props.label
+ * @param {string} props.value
+ * @param {string} [props.secondaryLabel]
+ * @param {string} [props.secondaryValue] - second line is hidden if empty
+ */
 function SummaryRow({ icon, label, value, secondaryLabel, secondaryValue }) {
   return (
     <View style={styles.workLogEntry}>
@@ -61,6 +80,24 @@ function SummaryRow({ icon, label, value, secondaryLabel, secondaryValue }) {
   );
 }
 
+/**
+ * Renders, depending on state:
+ * - A "Work Log" switch that shows every check-in/out with time and comment.
+ * - For completed jobs: the submitted checklist summary (date, answers,
+ *   notes, manager name, signature) and a "Reopen Job" button.
+ * - When the form is open: switches for Service Performed*, Material
+ *   Installed*, Final Walkthrough* and Return Needed, with description
+ *   boxes, misc notes, Manager Name*, a Manager Signoff (signature) button
+ *   and a "Final Check Out" submit button. (* = required)
+ *
+ * @param {Object} props
+ * @param {boolean} props.checkoutFormVisible - whether the form is shown
+ * @param {Function} props.setCheckoutFormVisible - shows/hides the form
+ * @param {Array<Object>} props.checkInOutData - the job's visits
+ * @param {Object|null} props.finalCheckoutData - previously saved checklist
+ * @param {Array<Object>} props.selectedJob - job row in a one-item array
+ * @param {() => void} props.onDismiss - closes the whole job modal
+ */
 export default function FinalCheckOut({
   checkoutFormVisible,
   setCheckoutFormVisible,
@@ -97,6 +134,12 @@ export default function FinalCheckOut({
     assignment_id: "",
   });
 
+  /**
+   * Updates one text field of the form.
+   *
+   * @param {string} name - field key (e.g. "desc_service_perf")
+   * @param {string} value - new text
+   */
   const handleInputChange = (name, value) => {
     setFormData({
       ...formData,
@@ -133,11 +176,33 @@ export default function FinalCheckOut({
     }));
   }, [checkoutFormVisible, finalCheckoutData]);
 
+  /**
+   * Validates and submits the completion checklist.
+   *
+   * How it works:
+   * 1. Turns on validation highlighting for all fields.
+   * 2. Requires descriptions of service performed and materials installed,
+   *    the manager's name, the three required switches and a signature;
+   *    shows an alert and stops if anything is missing.
+   * 3. Converts the switches to "1"/"0" strings and stamps the time.
+   * 4. Saves locally first, so nothing is lost offline: deletes any older
+   *    checklist for this job, inserts the new one as "Pending", marks the
+   *    job "Completed" in SQLite and refreshes the job list (the job moves to
+   *    the Completed tab).
+   * 5. If online: uploads the checklist; if that works, also posts the
+   *    completion record and sets `completed: 1` on the job in Firebase, and
+   *    marks the checklist synced ("Yes"). Otherwise it stays "Pending" and
+   *    the background sync uploads it later.
+   * 6. Closes the form and the job modal.
+   */
   async function onSubmit() {
     setForceValidate(true);
     if (!servicePerf) setServicePerf(true);
     if (!materialInst) setMaterialInst(true);
 
+    /**
+     * Converts a switch value to the "1"/"0" strings stored in the database.
+     */
     const boolToString = (val) => (val ? "1" : "0");
 
     const payload = {
@@ -265,6 +330,14 @@ export default function FinalCheckOut({
     }
   }
 
+  /**
+   * Reopens a completed job so its final check-out can be edited.
+   *
+   * After confirmation (requires internet), sets `completed: 0` on the job in
+   * Firebase, changes its local status back to "Scheduled", refreshes the job
+   * list (it moves back to Active Jobs) and opens the form, which is
+   * pre-filled with the previous answers.
+   */
   function handleReopen() {
     Alert.alert(
       "Reopen Job",
@@ -625,6 +698,9 @@ export default function FinalCheckOut({
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

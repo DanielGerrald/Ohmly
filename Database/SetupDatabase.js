@@ -1,7 +1,23 @@
+/**
+ * Local SQLite schema setup.
+ *
+ * Ohmly is offline-first: everything the technician sees is read from a local
+ * SQLite database, and changes are written there first and synced to Firebase
+ * later. This file creates that database's tables.
+ */
+
 import { environment } from "../Config";
 
+/**
+ * Current schema version. Bump this whenever a table definition changes; on
+ * next launch every device will drop and rebuild its local tables.
+ */
 const DATABASE_VERSION = 1;
 
+/**
+ * Every table (current and legacy) that is dropped before a rebuild. Legacy
+ * names are kept so old installs are cleaned up too.
+ */
 const TABLES_TO_DROP = [
   "user",
   "workorder",
@@ -15,6 +31,25 @@ const TABLES_TO_DROP = [
   "completion",
 ];
 
+/**
+ * Makes sure the local SQLite schema matches DATABASE_VERSION.
+ *
+ * How it works:
+ * 1. Reads SQLite's built-in `PRAGMA user_version` (0 on a brand new DB).
+ * 2. If it already equals DATABASE_VERSION, nothing is done.
+ * 3. Otherwise every table in TABLES_TO_DROP is dropped and the current
+ *    tables are created: user, assignment (work orders), contact,
+ *    category_type (labels), attachment (photos/files), visit
+ *    (check-in/out log) and completion (final check-out form).
+ * 4. Turns on WAL journaling and foreign keys, then stores the new version
+ *    number so the rebuild doesn't run again.
+ *
+ * Because the rebuild drops tables, any data not yet synced is lost when
+ * the version changes; the data is re-downloaded from Firebase afterwards.
+ * Passed to <SQLiteProvider onInit={...}> in App.js.
+ *
+ * @param {SQLiteDatabase} db - open expo-sqlite database
+ */
 export default async function setupDatabase(db) {
   try {
     let { user_version: currentDbVersion } = await db.getFirstAsync(

@@ -1,3 +1,8 @@
+/**
+ * "Files" tab of the job details modal: attach documents (PDF/JPEG) to a
+ * job and view the ones already submitted.
+ */
+
 import {
   Alert,
   Dimensions,
@@ -28,6 +33,20 @@ import Loading from "../ui/Loading";
 import AttachmentSubmit from "./AttachmentSubmit";
 import Colors from "../../constants/colors";
 
+/**
+ * For open jobs: a "Select Files" button (pick a label, then a document),
+ * the "Submit Attachments" button, the list of files not yet submitted and
+ * the list of submitted ones. For completed jobs: a read-only list of all
+ * files. Tap a file to open it; long-press an unsubmitted file to delete.
+ *
+ * The attachment folder id (`workOrderId`) is the part of the job's
+ * reference_code after the "-".
+ *
+ * @param {Object} props
+ * @param {Array<Object>} props.selectedJob - job row in a one-item array
+ * @param {() => Promise<void>} props.fetchFiles - reloads `files` from SQLite
+ * @param {Array<Object>} props.files - this job's document attachments
+ */
 export default function Files({ selectedJob, fetchFiles, files }) {
   const db = useSQLiteContext();
   const [loading, setLoading] = useState(false);
@@ -41,6 +60,9 @@ export default function Files({ selectedJob, fetchFiles, files }) {
     fetchFiles();
   }, []);
 
+  /**
+   * Loads the document label choices (type_group "Document Label") from SQLite.
+   */
   const fetchLabels = async () => {
     try {
       const result = await selectCategoryLabelSqlite(
@@ -58,6 +80,20 @@ export default function Files({ selectedJob, fetchFiles, files }) {
     }
   };
 
+  /**
+   * Lets the user pick a document and saves it as an unsubmitted attachment.
+   *
+   * How it works: also loads the user's token for the submit button. Opens
+   * the system document picker (PDF or JPEG). On iOS the picked file is
+   * copied into the app's documents folder so it stays available. A row is
+   * created with syncStatus "No" (not submitted yet). If a file with the
+   * same URI is already listed, the user is asked whether to replace it;
+   * otherwise it's inserted into SQLite and the list reloads. The label
+   * popup is always closed at the end.
+   *
+   * @param {number} labelId - chosen label's type_id
+   * @param {string} label - chosen label's text
+   */
   const pickFile = async (labelId, label) => {
     try {
       const lastLoggedIn = await lastLoggedinUserSqlite(db);
@@ -134,6 +170,12 @@ export default function Files({ selectedJob, fetchFiles, files }) {
     }
   };
 
+  /**
+   * Asks for confirmation, then deletes the attachment row from SQLite and
+   * reloads the list.
+   *
+   * @param {number} id - attachment id
+   */
   const deleteFile = (id) => {
     Alert.alert("Delete File", "Are you sure you want to delete this file?", [
       { text: "Cancel", style: "cancel" },
@@ -153,6 +195,12 @@ export default function Files({ selectedJob, fetchFiles, files }) {
     ]);
   };
 
+  /**
+   * Opens a file using the system share/preview sheet (works on Android
+   * where file:// links can't be opened directly).
+   *
+   * @param {string} uri - local file URI
+   */
   const openFile = async (uri) => {
     try {
       // A raw file:// URI can't be passed through Linking.openURL on Android —
@@ -166,14 +214,23 @@ export default function Files({ selectedJob, fetchFiles, files }) {
     }
   };
 
+  /**
+   * Opens the "Select a Label Category" popup.
+   */
   const showModal = () => {
     setModalVisible(true);
   };
 
+  /**
+   * Files added on this device but not submitted yet (syncStatus "No").
+   */
   const notSubmittedFiles = useMemo(() => {
     return files.filter((file) => file?.syncStatus === "No");
   }, [files]);
 
+  /**
+   * Files that were submitted: uploaded ("Yes") or waiting for internet ("Pending").
+   */
   const submittedFiles = useMemo(() => {
     return files.filter(
       (file) =>
@@ -411,6 +468,9 @@ export default function Files({ selectedJob, fetchFiles, files }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

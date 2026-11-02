@@ -1,9 +1,29 @@
+/**
+ * Final check-out: the completion checklist and sign-off filled in when a
+ * job is finished.
+ *
+ * Locally stored in the `completion` table. On the server the checklist
+ * goes to /CHECKLISTS/{assignment_id} and the completion record (with the
+ * closing comment) goes to /COMPLETIONS/{assignment_id}.
+ */
+
 import axios from "axios";
 import { getUnixTime } from "date-fns";
 import { environment } from "../Config";
 
 //---------------API Functions---------------//
 
+/**
+ * Uploads the completion checklist (answers, notes, manager name and
+ * signature) for one job.
+ *
+ * How it works: PUT to /CHECKLISTS/{assignment_id}.json. The local column
+ * `signature_base64` is sent as `manager_signature`.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {Object} data - completion row from SQLite
+ * @returns {Promise<boolean>} true on success
+ */
 export async function postFinalCheckListApi(token, data) {
   try {
     await axios.put(
@@ -35,6 +55,17 @@ export async function postFinalCheckListApi(token, data) {
   }
 }
 
+/**
+ * Downloads the completion checklist for one job.
+ *
+ * How it works: GET /CHECKLISTS/{assignment_id}.json and map it back to the
+ * local column names (manager_signature -> signature_base64). Marked
+ * syncStatus "Yes" because it came from the server.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {number|string} assignment_id - work order id
+ * @returns {Promise<Object|null>} completion row, or null if none / error
+ */
 export async function getFinalCheckoutApi(token, assignment_id) {
   try {
     const response = await axios.get(
@@ -69,6 +100,17 @@ export async function getFinalCheckoutApi(token, assignment_id) {
   }
 }
 
+/**
+ * Marks a job as completed on the server.
+ *
+ * How it works: PUT { comment, assignment_id, completed_date: now } to
+ * /COMPLETIONS/{assignment_id}.json.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {string} comment - closing comment from the technician
+ * @param {number|string} assignment_id - work order id
+ * @returns {Promise<boolean>} true on success
+ */
 export async function postFinalCheckoutApi(token, comment, assignment_id) {
   try {
     await axios.put(
@@ -92,6 +134,12 @@ export async function postFinalCheckoutApi(token, comment, assignment_id) {
 
 //---------------SQLITE Functions---------------//
 
+/**
+ * Inserts a completion row (non-empty fields only) into SQLite.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Object} data - completion fields
+ */
 export async function insertFinalCheckOutSqlite(db, data) {
   try {
     const columns = Object.keys(data).filter(
@@ -109,6 +157,15 @@ export async function insertFinalCheckOutSqlite(db, data) {
   }
 }
 
+/**
+ * Reads completion rows where one column equals a value.
+ * `key` must be a trusted column name.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {string} key - column (e.g. "assignment_id")
+ * @param {*} value
+ * @returns {Promise<Array<Object>|undefined>}
+ */
 export async function selectFinalCheckOutSqlite(db, key, value) {
   try {
     return await db.getAllAsync(`SELECT * FROM completion WHERE ${key} = ?`, [
@@ -119,6 +176,16 @@ export async function selectFinalCheckOutSqlite(db, key, value) {
   }
 }
 
+/**
+ * Runs: UPDATE completion SET key1 = value1 WHERE key2 = value2.
+ * Column names must be trusted.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {string} key1 - column to change
+ * @param {*} value1 - new value
+ * @param {string} key2 - column to match
+ * @param {*} value2 - value to match
+ */
 export async function updateFinalCheckOutSqlite(
   db,
   key1,
@@ -136,6 +203,12 @@ export async function updateFinalCheckOutSqlite(
   }
 }
 
+/**
+ * Deletes the completion row(s) for one job.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {number} assignment_id - work order id
+ */
 export async function deleteFinalCheckOutSqlite(db, assignment_id) {
   try {
     await db.runAsync("DELETE FROM completion WHERE assignment_id = ?", [
@@ -146,6 +219,13 @@ export async function deleteFinalCheckOutSqlite(db, assignment_id) {
   }
 }
 
+/**
+ * Deletes completion rows for work orders that no longer exist on the
+ * server (or all rows if the server returned none).
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Array<Object>} value - latest result of getAssignmentsApi
+ */
 export async function cleanupFinalCheckOutSqlite(db, value) {
   try {
     const workOrderIds = (value ?? []).map((item) => item.assignment.id);

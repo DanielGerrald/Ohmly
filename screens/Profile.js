@@ -1,3 +1,8 @@
+/**
+ * Profile tab: view and edit the technician's details, notification
+ * preferences, and log out.
+ */
+
 import { useEffect, useRef, useState } from "react";
 import { Dimensions, StyleSheet, View, Text, Switch, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,6 +25,11 @@ import { useJob } from "../components/Context";
 import { useAuth } from "../components/AuthContext";
 import Colors from "../constants/colors";
 
+/**
+ * Renders the avatar, the profile form (first/last name, email, phone),
+ * email/SMS notification switches, Update and Log Out buttons, and the
+ * re-authentication modal used for email changes.
+ */
 export default function Profile() {
   const db = useSQLiteContext();
   const { logout, refreshUser } = useAuth();
@@ -37,6 +47,10 @@ export default function Profile() {
   });
 
   useEffect(() => {
+    /**
+     * Loads the current user from SQLite and fills the form and the
+     * notification switches with their saved values.
+     */
     const fetchUserData = async () => {
       try {
         const user = await lastLoggedinUserSqlite(db);
@@ -61,6 +75,12 @@ export default function Profile() {
     fetchUserData();
   }, []);
 
+  /**
+   * Updates one field of the form state.
+   *
+   * @param {string} name - field name (first_name, last_name, email, phone_nbr)
+   * @param {string} value - new text
+   */
   const handleInputChange = (name, value) => {
     setFormData({
       ...formData,
@@ -68,6 +88,21 @@ export default function Profile() {
     });
   };
 
+  /**
+   * Saves the profile.
+   *
+   * How it works:
+   * 1. All four fields are required.
+   * 2. Saves name, phone and notification settings to SQLite.
+   * 3. Sends the new display name ("First Last") to Firebase Auth and stores
+   *    the fresh tokens Firebase returns.
+   * 4. If the email changed, asks Firebase to send a verification link to the
+   *    new address. If Firebase says the login is too old
+   *    (CREDENTIAL_TOO_OLD_LOGIN_AGAIN), the new email is remembered and the
+   *    password prompt (ReauthModal) is shown instead; handleReauthConfirm
+   *    finishes the job.
+   * 5. Refreshes the user in AuthContext and shows a success message.
+   */
   const onSubmit = async () => {
     const { first_name, last_name, phone_nbr, email } = formData;
 
@@ -116,6 +151,15 @@ export default function Profile() {
     }
   };
 
+  /**
+   * Finishes an email change after the user re-enters their password.
+   *
+   * How it works: signs in again with the current email and the given
+   * password to get a fresh token, saves the new tokens to SQLite, then
+   * retries the email change request with the pending new address.
+   *
+   * @param {string} password - password typed into the ReauthModal
+   */
   const handleReauthConfirm = async (password) => {
     try {
       const freshLogin = await getLoginApi({
@@ -250,6 +294,9 @@ export default function Profile() {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

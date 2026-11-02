@@ -1,3 +1,7 @@
+/**
+ * Tappable round profile picture used on the Profile screen.
+ */
+
 import { Alert, Image, StyleSheet, TouchableOpacity } from "react-native";
 import { useEffect, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
@@ -14,6 +18,13 @@ import {
 import { useSQLiteContext } from "expo-sqlite";
 import { useJob } from "../Context";
 
+/**
+ * Shows the user's avatar (or a default icon) and lets them pick a new one
+ * from the photo library.
+ *
+ * Reloads the avatar from SQLite whenever a sync finishes (syncVersion), so
+ * an avatar changed on another device shows up after syncing.
+ */
 export default function AvatarIcon() {
   const db = useSQLiteContext();
   const { syncVersion } = useJob();
@@ -22,6 +33,9 @@ export default function AvatarIcon() {
   const profileIconUri = Image.resolveAssetSource(profileIcon).uri;
 
   useEffect(() => {
+    /**
+     * Loads the current user from SQLite and shows their saved avatar (or the default icon).
+     */
     const fetchUserData = async () => {
       try {
         const user = await lastLoggedinUserSqlite(db);
@@ -36,6 +50,16 @@ export default function AvatarIcon() {
     fetchUserData();
   }, [syncVersion]);
 
+  /**
+   * Lets the user choose and crop a new profile picture.
+   *
+   * How it works: opens the photo library with cropping enabled; the chosen
+   * image is resized to 300px wide, compressed as JPEG and turned into a
+   * base64 data URI. That string is shown immediately, saved to the user row
+   * in SQLite, and, if the device is online, uploaded to Firebase. (If
+   * offline, the remote copy is not updated until the avatar is changed
+   * again while online.)
+   */
   const pickImageAsync = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,

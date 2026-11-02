@@ -2,10 +2,19 @@ import { Dimensions, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } 
 import Colors from "../../constants/colors";
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;
 
+/**
+ * "Details" tab: shows the job's work description and contractor
+ * requirements.
+ *
+ * @param {{details: Array<Object>}} props - the job row in a one-item array
+ */
 export default function Details({ details }) {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={"height"}>

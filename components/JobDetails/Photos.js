@@ -1,3 +1,8 @@
+/**
+ * "Photos" tab of the job details modal: take or choose photos, label them,
+ * submit them, and view them full-screen.
+ */
+
 import * as React from "react";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -31,6 +36,15 @@ import Loading from "../ui/Loading";
 import AttachmentSubmit from "./AttachmentSubmit";
 import Colors from "../../constants/colors";
 
+/**
+ * One photo thumbnail with chips for its label, date and (if waiting for
+ * internet) a "Pending" badge.
+ *
+ * @param {Object} props
+ * @param {Object} props.image - attachment row
+ * @param {Function} props.onPress - tap handler (open full-screen viewer)
+ * @param {Function} [props.onLongPress] - long-press handler (delete)
+ */
 function ImageThumbnail({ image, onPress, onLongPress }) {
   return (
     <TouchableOpacity
@@ -70,6 +84,17 @@ function ImageThumbnail({ image, onPress, onLongPress }) {
   );
 }
 
+/**
+ * For open jobs: "Select" / "Take" photo buttons (each first asks for a
+ * label), the "Submit Attachments" button, unsubmitted photos (long-press
+ * to delete) and submitted photos. For completed jobs: a read-only grid.
+ * Tapping any photo opens a full-screen swipeable viewer.
+ *
+ * @param {Object} props
+ * @param {Array<Object>} props.selectedJob - job row in a one-item array
+ * @param {() => Promise<void>} props.fetchPhotos - reloads `images`
+ * @param {Array<Object>} props.images - this job's photo attachments
+ */
 export default function Photos({ selectedJob, fetchPhotos, images }) {
   const db = useSQLiteContext();
   const [loading, setLoading] = useState(false);
@@ -90,6 +115,9 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     fetchPhotos();
   }, []);
 
+  /**
+   * Loads the photo label choices (type_group "Photo Label") from SQLite.
+   */
   const fetchLabels = async () => {
     try {
       const result = await selectCategoryLabelSqlite(
@@ -109,18 +137,33 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     }
   };
 
+  /**
+   * Loads the current user's ID token (needed by the submit button).
+   */
   const lastLoggedIn = async () => {
     await lastLoggedinUserSqlite(db).then((r) => {
       setToken(r.idToken);
     });
   };
 
+  /**
+   * Creates a unique photo file name: "<unix seconds>_<random>.jpg".
+   *
+   * @returns {string}
+   */
   const generateUniqueFileName = () => {
     const timestamp = moment().unix();
     const randomString = Math.random().toString(36).slice(2, 11);
     return `${timestamp}_${randomString}.jpg`;
   };
 
+  /**
+   * Lets the user choose one or more photos from the library and saves them
+   * as unsubmitted attachments (syncStatus "No") with the chosen label.
+   *
+   * @param {number} labelId - chosen label's type_id
+   * @param {string} label - chosen label's text
+   */
   const pickImage = async (labelId, label) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -157,6 +200,16 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     }
   };
 
+  /**
+   * Copies picked/captured photos into the app's permanent documents folder.
+   *
+   * How it works: each photo is re-encoded as JPEG (which applies its EXIF
+   * rotation so it displays upright) and copied to a new file. The image
+   * object's `uri` is updated to the new path. Photos that fail are skipped.
+   *
+   * @param {Array<Object>} selectedImages - attachment objects to save
+   * @returns {Promise<Array<Object>>} the successfully saved ones
+   */
   async function saveImage(selectedImages) {
     const updatedImages = [];
     for (const image of selectedImages) {
@@ -187,6 +240,12 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     return updatedImages;
   }
 
+  /**
+   * Asks for confirmation, then deletes the photo row from SQLite and
+   * reloads the list.
+   *
+   * @param {number} id - attachment id
+   */
   const deleteImage = (id) => {
     Alert.alert("Delete Image", "Are you sure you want to delete this image?", [
       { text: "Cancel", style: "cancel" },
@@ -206,6 +265,13 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     ]);
   };
 
+  /**
+   * Asks for camera permission and, if granted, opens the camera. If denied,
+   * offers to open the device settings.
+   *
+   * @param {number} labelId
+   * @param {string} label
+   */
   const handleCameraPermission = useCallback(
     async (labelId, label) => {
       const permission = await requestCameraPermission();
@@ -223,6 +289,13 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     [requestCameraPermission],
   );
 
+  /**
+   * Opens the camera, then saves the photo taken as an unsubmitted attachment
+   * (syncStatus "No") with the chosen label.
+   *
+   * @param {number} labelId
+   * @param {string} label
+   */
   const cameraLaunch = async (labelId, label) => {
     try {
       const result = await ImagePicker.launchCameraAsync({
@@ -259,6 +332,13 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     }
   };
 
+  /**
+   * Called when a label is chosen in the popup: continues with either the
+   * photo library or the camera, depending on which button opened the popup.
+   *
+   * @param {number} labelId
+   * @param {string} label
+   */
   const handleAction = (labelId, label) => {
     if (actionType === "select") {
       pickImage(labelId, label);
@@ -267,11 +347,21 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     }
   };
 
+  /**
+   * Opens the label popup and remembers which action to run afterwards.
+   *
+   * @param {"select"|"take"} type
+   */
   const showModal = (type) => {
     setActionType(type);
     setModalVisible(true);
   };
 
+  /**
+   * Opens the full-screen viewer at the tapped photo.
+   *
+   * @param {string} imageUri - URI of the tapped photo
+   */
   const openImageView = (imageUri) => {
     const index = images.findIndex((img) => img.uri === imageUri);
     if (index === -1) return;
@@ -279,10 +369,16 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     setImageViewVisible(true);
   };
 
+  /**
+   * Closes the full-screen viewer.
+   */
   const closeImageView = () => {
     setImageViewVisible(false);
   };
 
+  /**
+   * Close (X) button shown at the top of the full-screen viewer.
+   */
   const ImageViewerHeader = () => (
     <SafeAreaView style={styles.imageViewerHeader}>
       <TouchableOpacity onPress={closeImageView}>
@@ -291,6 +387,9 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     </SafeAreaView>
   );
 
+  /**
+   * The full-screen viewer element, only created while it's open.
+   */
   const imageViewerModal = imageViewVisible && selectedImageIndex !== null && (
     <ImageViewer
       images={images.map((img) => ({ uri: img.uri }))}
@@ -301,10 +400,16 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
     />
   );
 
+  /**
+   * Photos added on this device but not submitted yet (syncStatus "No").
+   */
   const notSubmittedImages = useMemo(() => {
     return images.filter((image) => image?.syncStatus === "No");
   }, [images]);
 
+  /**
+   * Photos that were submitted: uploaded ("Yes") or waiting for internet ("Pending").
+   */
   const submittedImages = useMemo(() => {
     return images.filter(
       (image) =>
@@ -455,6 +560,9 @@ export default function Photos({ selectedJob, fetchPhotos, images }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

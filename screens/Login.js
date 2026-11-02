@@ -1,3 +1,11 @@
+/**
+ * Login screen.
+ *
+ * Signs the technician in with Firebase, saves their profile to SQLite and
+ * downloads their jobs before showing the main app, so everything is
+ * available offline right after login.
+ */
+
 import { Image } from "expo-image";
 import {
   Alert,
@@ -61,6 +69,10 @@ import { useSQLiteContext } from "expo-sqlite";
 import { BLURHASH } from "../components/constants";
 import Colors from "../constants/colors";
 
+/**
+ * Renders the login form (username/email, password with show/hide toggle,
+ * "Forgot Password?" link, LOGIN button and sign-up link).
+ */
 export default function Login() {
   const { login } = useAuth();
   const navigation = useNavigation();
@@ -73,10 +85,28 @@ export default function Login() {
     password: "",
   });
 
+  /**
+   * Updates one field of the form state.
+   *
+   * @param {"username"|"password"} name - field to update
+   * @param {string} value - new text
+   */
   const handleInputChange = (name, value) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  /**
+   * Saves one job and its related data to SQLite during login.
+   *
+   * How it works: upserts the work order; if the server marks it completed,
+   * sets its local status to "Completed" and downloads the completion
+   * checklist (if not stored yet). Then downloads and stores the job's
+   * contacts, and its attachments (only those not already stored). The
+   * attachment folder id is the part of the site's reference_code after "-".
+   *
+   * @param {Object} job - one item from getAssignmentsApi
+   * @param {string} idToken - Firebase ID token
+   */
   async function syncJob(job, idToken) {
     await insertWorkOrderSqlite(db, job);
 
@@ -128,6 +158,24 @@ export default function Login() {
     }
   }
 
+  /**
+   * Handles the LOGIN button.
+   *
+   * How it works:
+   * 1. Requires both fields to be filled in.
+   * 2. Checks the network and calls Firebase sign-in. If the internet isn't
+   *    reachable it falls back to handleOfflineLogin.
+   *    Note: getLoginApi runs before the offline check and throws when there
+   *    is no connection, so in practice a fully offline device ends up in the
+   *    catch block ("An error occurred") rather than the offline login path.
+   * 3. Loads the user's profile and avatar and saves/updates the local user
+   *    row (marking them logged in with the current time as last_login).
+   * 4. Re-reads the user and verifies the token isn't expired.
+   * 5. Downloads all jobs and labels; removes local data for jobs that no
+   *    longer exist, stores the labels and syncs each job (syncJob).
+   * 6. Calls login() from AuthContext, which switches to the main app.
+   * Any error shows a generic alert.
+   */
   async function onSubmit() {
     const { username, password } = formData;
 
@@ -215,6 +263,14 @@ export default function Login() {
     }
   }
 
+  /**
+   * Lets a previously-logged-in user in without internet.
+   *
+   * How it works: looks the user up in SQLite by the email typed in. If they
+   * exist and their saved token hasn't expired, they're logged in with the
+   * cached data; otherwise an alert explains they need internet. The password
+   * is not checked in this path.
+   */
   async function handleOfflineLogin() {
     setLoading(false);
     const sqliteUserData = await selectUserByEmailSqlite(db, formData.username);
@@ -233,6 +289,9 @@ export default function Login() {
     }
   }
 
+  /**
+   * Shows or hides the password text.
+   */
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
@@ -326,6 +385,9 @@ export default function Login() {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

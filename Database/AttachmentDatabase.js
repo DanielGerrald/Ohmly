@@ -1,3 +1,16 @@
+/**
+ * Attachments: photos and documents linked to a work order.
+ *
+ * Files are stored on the device (file `uri`) and tracked in the local
+ * `attachment` table with a `syncStatus`:
+ *   "No"        - added on the device, not submitted yet
+ *   "Pending"   - submitted but waiting for internet (retried on next sync)
+ *   "Uploading" - upload in progress
+ *   "Yes"       - uploaded (or downloaded from the server)
+ * Uploads store the file as base64 in the Realtime Database under
+ * /ATTACHMENTS/{assignment_ref_id}/{fileName}.
+ */
+
 import axios from "axios";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -6,9 +19,31 @@ import { environment } from "../Config";
 
 //---------------API Functions---------------//
 
+/**
+ * Replaces characters Firebase doesn't allow in keys with "_" so a file
+ * name can be used as a database key / local file name.
+ *
+ * @param {*} value - usually a file name
+ * @returns {string}
+ */
 // Firebase keys can't contain ".", "#", "$", "/", "[", "]".
 const sanitizeKey = (value) => String(value).replace(/[.#$/[\]]/g, "_");
 
+/**
+ * Uploads one attachment (photo or document) to Firebase.
+ *
+ * How it works:
+ * 1. Photos are resized to 1600px wide and re-compressed as JPEG (quality
+ *    0.6) to keep the upload small; documents are read as-is.
+ * 2. The file content is base64-encoded.
+ * 3. The metadata + base64 are PUT to
+ *    /ATTACHMENTS/{assignment_ref_id}/{sanitized fileName}.json.
+ * Errors are NOT caught here; the public wrappers below handle them.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {Object} data - attachment row (uri, fileName, type, label, ...)
+ * @returns {Promise<{status: number}>} { status: 200 } on success
+ */
 async function putAttachment(token, data) {
   // Photos are captured/picked at full quality (several MB), which after
   // base64 inflation (~33%) can make the write body large enough that
@@ -56,6 +91,14 @@ async function putAttachment(token, data) {
   return { status: 200 };
 }
 
+/**
+ * Uploads a photo. Wrapper around putAttachment that turns errors into
+ * { status: 500 } instead of throwing.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {Object} photo - attachment row
+ * @returns {Promise<{status: number}>} 200 on success, 500 on failure
+ */
 export async function postPhotosApi(token, photo) {
   try {
     return await putAttachment(token, photo);
@@ -68,6 +111,13 @@ export async function postPhotosApi(token, photo) {
   }
 }
 
+/**
+ * Uploads a document (e.g. PDF). Same as postPhotosApi but for documents.
+ *
+ * @param {string} token - Firebase ID token
+ * @param {Object} document - attachment row
+ * @returns {Promise<{status: number}>} 200 on success, 500 on failure
+ */
 export async function postDocumentsApi(token, document) {
   try {
     return await putAttachment(token, document);
@@ -80,6 +130,13 @@ export async function postDocumentsApi(token, document) {
   }
 }
 
+/**
+ * @param {string} token - Firebase ID token
+ * @param {number|string} id - work order reference id
+ * @returns {Promise<Array<Object>>} attachment rows (with local `uri` and
+ *   syncStatus "Yes"); items without a file name/content, or that fail to
+ *   save to disk, are skipped. Returns [] on error.
+ */
 // Downloads attachment metadata + content for one assignment and writes each
 // file's base64 content to local storage so it has a usable `uri`, matching
 // the shape of a freshly-picked photo/document (ready for insertAttachmentSqlite).
@@ -131,6 +188,13 @@ export async function getAttachmentsApi(token, id) {
 
 //---------------SQLITE Functions---------------//
 
+/**
+ * Inserts a single attachment row (only the non-empty columns).
+ * Throws on error; used by insertAttachmentSqlite.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Object} obj - attachment fields
+ */
 async function insertOneAttachment(db, obj) {
   const columns = Object.keys(obj).filter(
     (key) => obj[key] !== undefined && obj[key] !== null,
@@ -144,6 +208,12 @@ async function insertOneAttachment(db, obj) {
   );
 }
 
+/**
+ * Inserts one attachment or a list of attachments into SQLite.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Object|Array<Object>} data - a row or array of rows
+ */
 export async function insertAttachmentSqlite(db, data) {
   try {
     const rows = Array.isArray(data) ? data : [data];
@@ -155,6 +225,20 @@ export async function insertAttachmentSqlite(db, data) {
   }
 }
 
+/**
+ * Reads attachments matching one or two column conditions.
+ *
+ * Example: selectAttachmentSqlite(db, "assignment_id", 12, "type", "Photo").
+ * The second condition is only applied if both key2 and value2 are given.
+ * Column names are placed directly in the SQL, so only pass trusted names.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {string} key1 - first column to filter on
+ * @param {*} value1
+ * @param {string} [key2] - optional second column
+ * @param {*} [value2]
+ * @returns {Promise<Array<Object>|undefined>}
+ */
 export async function selectAttachmentSqlite(db, key1, value1, key2, value2) {
   try {
     let query = `SELECT * FROM attachment WHERE ${key1} = ?`;
@@ -171,6 +255,16 @@ export async function selectAttachmentSqlite(db, key1, value1, key2, value2) {
   }
 }
 
+/**
+ * Updates an attachment identified by its file name.
+ *
+ * How it works: every non-empty field on `data` (except `id`) is written;
+ * the row is matched by `data.fileName`. Commonly used to flip
+ * syncStatus to "Yes" after a successful upload, or to change the label.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Object} data - fields to change, must include fileName
+ */
 export async function updateAttachmentSqlite(db, data) {
   try {
     const fieldsToUpdate = [];
@@ -191,6 +285,12 @@ export async function updateAttachmentSqlite(db, data) {
   }
 }
 
+/**
+ * Deletes an attachment row by id (the file on disk is not removed here).
+ *
+ * @param {SQLiteDatabase} db
+ * @param {number} id - attachment row id
+ */
 export async function deleteAttachmentSqlite(db, id) {
   try {
     await db.runAsync("DELETE FROM attachment WHERE id = ?", [id]);
@@ -199,6 +299,13 @@ export async function deleteAttachmentSqlite(db, id) {
   }
 }
 
+/**
+ * Deletes attachments belonging to work orders that no longer exist on the
+ * server (or all attachments if the server returned none).
+ *
+ * @param {SQLiteDatabase} db
+ * @param {Array<Object>} value - latest result of getAssignmentsApi
+ */
 export async function cleanupAttachmentSqlite(db, value) {
   try {
     const workOrderIds = (value ?? []).map((item) => item.assignment.id);

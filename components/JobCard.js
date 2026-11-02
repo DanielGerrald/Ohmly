@@ -1,3 +1,7 @@
+/**
+ * List of tappable job summary cards, plus the job details modal.
+ */
+
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Card, Avatar } from "react-native-paper";
 import moment from "moment";
@@ -9,12 +13,25 @@ import { selectContactSqlite } from "../Database/ContactDatabase";
 import { useSQLiteContext } from "expo-sqlite";
 import Colors from "../constants/colors";
 
+/**
+ * Renders one card per job (reference number, category, site, address and
+ * scheduled date). Tapping a card opens the JobModal for that job.
+ *
+ * @param {{jobData: Array<Object>}} props - jobs to show (assignment rows)
+ */
 export default function JobCard({ jobData }) {
   const db = useSQLiteContext();
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedJob, setSelectedJob] = useState([]);
   const [selectedContact, setSelectedContact] = useState([]);
 
+  /**
+   * Loads the full job row and its contacts from SQLite, then opens the
+   * details modal. The modal is closed first so it re-opens fresh if another
+   * job was already showing.
+   *
+   * @param {number} jobId - work order id
+   */
   const showModal = async (jobId) => {
     setModalVisible(false);
     setSelectedJob(await selectWorkOrderSqlite(db, "id", jobId));
@@ -24,6 +41,9 @@ export default function JobCard({ jobData }) {
     setModalVisible(true);
   };
 
+  /**
+   * Closes the details modal and clears the selected job/contact.
+   */
   const hideModal = () => {
     setModalVisible(false);
     setSelectedJob([]);
@@ -148,6 +168,9 @@ export default function JobCard({ jobData }) {
 }
 
 const { width, height } = Dimensions.get("window");
+/**
+ * Base font size, scaled up for wider screens (phones < 380px, large phones, tablets > 600px).
+ */
 let textStyle = 12;
 if (width >= 380 && width <= 600) textStyle = 16;
 else if (width > 600) textStyle = 20;

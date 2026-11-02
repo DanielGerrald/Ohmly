@@ -1,3 +1,18 @@
+/**
+ * Data synchronization between the device (SQLite) and Firebase.
+ *
+ * Ohmly works offline: technicians check in/out, take photos, upload files
+ * and complete jobs while possibly offline. Those actions are saved locally
+ * with syncStatus "Pending". The sync pipeline here:
+ * 1. Pushes pending check-ins/outs, final check-outs and attachments.
+ * 2. Downloads the latest jobs (plus contacts, visits, attachments, labels)
+ *    and the user profile, and stores them in SQLite.
+ * 3. Removes local data for jobs that no longer exist on the server.
+ *
+ * It runs once after login, on pull-to-refresh, and whenever the app comes
+ * back to the foreground.
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ScrollView,
@@ -65,8 +80,28 @@ import { getLabelsApi, insertCategoryLabelSqlite } from "../Database/LabelDataba
 import BannerOnPendingSync from "./BannerOnPendingSync";
 import Colors from "../constants/colors";
 
+/**
+ * Returns a promise that resolves after `ms` milliseconds (used to space out
+ * requests).
+ *
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Hook that exposes the sync pipeline to a screen.
+ *
+ * @param {Object} [options]
+ * @param {Function} [options.fetchPhotos] - called after a manual sync so
+ *   the current screen can reload its photos
+ * @param {Function} [options.fetchFiles] - same, for documents
+ * @param {Function} [options.onSyncSuccess] - called with a message after a
+ *   successful manual sync (used to show a banner)
+ * @returns {{refreshing: boolean, onRefresh: Function,
+ *   scrollViewRef: React.RefObject}} state and handler for a
+ *   pull-to-refresh ScrollView
+ */
 export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   const db = useSQLiteContext();
   const { user: authUser } = useAuth();
@@ -75,6 +110,13 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   const scrollViewRef = useRef(null);
 
   /** AUTH & SESSION **/
+  /**
+   * Returns the logged-in user, or null (showing a "please log in" alert
+   * unless `silent` is true).
+   *
+   * @param {{silent?: boolean}} [options]
+   * @returns {Promise<Object|null>}
+   */
   const getAuthenticatedUser = async ({ silent = false } = {}) => {
     if (!authUser) {
       if (!silent) showOnceAlert("No User", "Not logged in", "Please log in.");
@@ -84,6 +126,30 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** JOB SYNC (open + completed + details + contacts + checkins) **/
+  /**
+   * Downloads all jobs and their related data and saves them in SQLite.
+   *
+   * How it works:
+   * 1. Gets all work orders. If there are none, clears the local list.
+   * 2. For each job, one at a time (to avoid overloading the network/disk),
+   *    fetches contacts, visits and attachments in parallel:
+   *    - contacts are upserted;
+   *    - visits are marked synced, de-duplicated against local copies and
+   *      upserted;
+   *    - attachments are only inserted if a row with the same file name
+   *      doesn't already exist for that job.
+   *    The attachment folder id comes from the second part of the site's
+   *    reference_code (e.g. "ABC-123" -> "123").
+   * 3. Downloads and stores the attachment labels.
+   * 4. Deletes local rows for jobs that are no longer returned.
+   * 5. Upserts each job. For jobs the server marks as completed, sets the
+   *    local status to "Completed" and downloads the completion checklist if
+   *    it isn't stored yet.
+   * 6. Re-reads this user's jobs from SQLite into the Job context and bumps
+   *    syncVersion so open screens reload.
+   *
+   * @param {Object} user - logged-in user (needs idToken and localId)
+   */
   const fetchAndStoreJobs = async (user) => {
     const token = user.idToken;
 
@@ -211,6 +277,13 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** ATTACHMENTS **/
+  /**
+   * Uploads every attachment with syncStatus "Pending" (in parallel).
+   * Successful uploads are marked "Yes"; failures stay "Pending" so the next
+   * sync retries them.
+   *
+   * @param {string} token - Firebase ID token
+   */
   const syncPendingAttachments = async (token) => {
     const pending = await selectAttachmentSqlite(
       db,
@@ -239,6 +312,16 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** CHECK IN AND OUT **/
+  /**
+   * Uploads pending check-ins/outs one at a time, oldest first.
+   *
+   * They are sent in order with a 1-second pause between them because the
+   * order matters (check-in before check-out). If any upload fails, it stops
+   * so later records are not sent out of order; the next sync continues from
+   * there.
+   *
+   * @param {string} token - Firebase ID token
+   */
   const syncPendingCheckInOut = async (token) => {
     const pending = await selectCheckInOutSqlite(
       db,
@@ -273,6 +356,15 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** FINAL CHECKOUT **/
+  /**
+   * Uploads pending final check-outs (in parallel).
+   *
+   * For each record it first uploads the checklist, then the completion
+   * record. Only if both succeed is the record marked synced and the job
+   * marked "Completed" locally.
+   *
+   * @param {string} token - Firebase ID token
+   */
   const syncPendingFinalCheckouts = async (token) => {
     const pending = await selectFinalCheckOutSqlite(
       db,
@@ -320,6 +412,12 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** MAIN SYNC PIPELINE **/
+  /**
+   * Downloads the user's name/email and avatar from Firebase and saves them
+   * to the local user row. Errors are logged, not thrown.
+   *
+   * @param {Object} user - logged-in user
+   */
   const fetchAndStoreUserProfile = async (user) => {
     try {
       const profile = await getUserProfileApi(user);
@@ -337,6 +435,13 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
     }
   };
 
+  /**
+   * The full sync pipeline: upload pending check-ins/outs, then final
+   * check-outs, then attachments; wait 2 seconds so the server has processed
+   * them; then download jobs and the user profile at the same time.
+   *
+   * @param {Object} user - logged-in user
+   */
   const runSyncTasks = async (user) => {
     const token = user.idToken;
     await syncPendingCheckInOut(token);
@@ -350,6 +455,15 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   };
 
   /** PUBLIC REFRESH HANDLER **/
+  /**
+   * Manual sync (pull-to-refresh and app-returns-to-foreground).
+   *
+   * How it works: ignores the call if a sync is already running (local
+   * `refreshing` flag or the shared SyncLock). Checks for internet first and
+   * shows a one-time alert if offline. Runs the full pipeline, lets the
+   * screen reload photos/files, and reports success. Always scrolls back to
+   * the top and releases the lock when done.
+   */
   const onRefresh = useCallback(async () => {
     if (refreshing || syncLock.isProcessing) return;
 
@@ -391,6 +505,13 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
     }
   }, [refreshing, fetchPhotos, fetchFiles]);
 
+  /**
+   * Initial sync after login.
+   *
+   * Runs the pipeline only once per session (guarded by
+   * SyncLock.didInitSession) and silently skips if no one is logged in.
+   * Turns off the job list loading spinner when done, even on error.
+   */
   const manageSession = useCallback(async () => {
     if (syncLock.didInitSession) return;
     syncLock.didInitSession = true;
@@ -418,10 +539,28 @@ export function useAppSync({ fetchPhotos, fetchFiles, onSyncSuccess } = {}) {
   return { refreshing, onRefresh, scrollViewRef };
 }
 
+/**
+ * Screen wrapper that adds pull-to-refresh syncing.
+ *
+ * Renders its children inside a ScrollView with a RefreshControl wired to
+ * the sync pipeline, shows a pending-sync banner when there is unsynced
+ * data, and briefly shows a green "Sync successful" banner after a manual
+ * sync.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.children - screen content
+ * @param {Function} [props.fetchPhotos] - reload photos after a sync
+ * @param {Function} [props.fetchFiles] - reload files after a sync
+ */
 export default function AppSyncManager({ children, fetchPhotos, fetchFiles }) {
   const [bannerVisible, setBannerVisible] = useState(false);
   const [bannerText, setBannerText] = useState("");
 
+  /**
+   * Shows the success banner with the given text for 3 seconds.
+   *
+   * @param {string} [text="Sync successful"]
+   */
   const showBanner = (text = "Sync successful") => {
     setBannerText(text);
     setBannerVisible(true);

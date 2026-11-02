@@ -1,3 +1,7 @@
+/**
+ * Upload logic for the "Submit Attachments" button.
+ */
+
 import { useCallback, useState } from "react";
 import * as Network from "expo-network";
 
@@ -9,9 +13,33 @@ import {
 import { showOnceAlert } from "../AlertManager";
 import syncLock from "../SyncLock";
 
+/**
+ * Hook (despite the lowercase name it uses React hooks, so it must be
+ * called at the top level of a component) that uploads pending attachments.
+ *
+ * @param {SQLiteDatabase} db
+ * @param {string} token - Firebase ID token
+ * @param {Array<Object>} attachments - attachments currently listed
+ * @param {() => Promise<void>} refreshAttachments - reloads the list
+ * @returns {{processPendingAttachments: Function, isProcessing: boolean}}
+ */
 export function attachmentsProcess(db, token, attachments, refreshAttachments) {
   const [isProcessing, setIsProcessing] = useState(false);
 
+  /**
+   * Uploads every attachment with syncStatus "No" or "Pending".
+   *
+   * How it works:
+   * 1. Does nothing if another sync is running (shared SyncLock) or there is
+   *    nothing to upload; otherwise takes the lock.
+   * 2. If there is no internet, marks them all "Pending" (the background
+   *    sync will retry later), shows an alert and stops.
+   * 3. Otherwise uploads them one at a time: mark "Uploading", re-check the
+   *    connection, upload, then mark "Yes" on success or "Pending" on
+   *    failure. If the connection drops part-way, the rest are left for later
+   *    and the user is told.
+   * 4. Reloads the list and always releases the lock.
+   */
   const processPendingAttachments = useCallback(async () => {
     const pendingAttachments = attachments.filter(
       (att) => att.syncStatus === "No" || att.syncStatus === "Pending",
